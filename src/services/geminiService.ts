@@ -35,6 +35,43 @@ export interface GeneratedCriteriaResponse {
   suggestedConstraints?: string[];
 }
 
+export interface GoalScaffold {
+  refinedGoal: string;
+  objectives: string[];
+  acceptanceCriteria: string[];
+  constraints: string[];
+  suggestedAllowedPaths: string[];
+  suggestedForbiddenPaths: string[];
+  testFirstRecommended: boolean;
+  openQuestions: string[];
+  rationale: string;
+}
+
+export interface GoalScaffoldParams {
+  goal: string;
+  repo?: string;
+  baseBranch?: string;
+  repoContext?: RepoContext | null;
+  existingCriteria?: string[];
+  constraints?: string[];
+  allowedPaths?: string[];
+  forbiddenPaths?: string[];
+  testFirstMode?: boolean;
+  settings?: SettingsState;
+  temperature?: number;
+  model?: string;
+}
+
+export interface GoalScaffoldSelection {
+  useRefinedGoal: boolean;
+  acceptanceCriteria: string[];
+  constraints: string[];
+  allowedPaths: string[];
+  forbiddenPaths: string[];
+  applyTestFirstRecommendation: boolean;
+  replace: boolean;
+}
+
 export class GeminiService {
   /**
    * Autogenerate high-quality, testable acceptance criteria using Gemini based on high-level goal
@@ -71,6 +108,55 @@ export class GeminiService {
     } catch (err: any) {
       console.warn('Acceptance criteria generation failed:', err);
       throw new Error(err.message || 'Failed to generate acceptance criteria. Ensure GEMINI_API_KEY is configured.');
+    }
+  }
+
+  /**
+   * Build a reviewable mission specification from a high-level goal.
+   */
+  static async generateGoalScaffold(params: GoalScaffoldParams): Promise<GoalScaffold> {
+    const temperature = params.temperature ?? params.settings?.geminiTemperature ?? 0.2;
+    const model = params.model ?? params.settings?.geminiModel ?? 'gemini-3.7-flash';
+
+    try {
+      const res = await fetch('/api/gemini/scaffold-goal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          goal: params.goal,
+          repo: params.repo,
+          baseBranch: params.baseBranch,
+          repoContext: params.repoContext,
+          existingCriteria: params.existingCriteria || [],
+          constraints: params.constraints || [],
+          allowedPaths: params.allowedPaths || [],
+          forbiddenPaths: params.forbiddenPaths || [],
+          defaultForbiddenPaths: params.settings?.defaultForbiddenPaths || [],
+          testFirstMode: params.testFirstMode || false,
+          model,
+          temperature,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to scaffold mission inputs');
+      }
+
+      return {
+        refinedGoal: data.refinedGoal || params.goal,
+        objectives: Array.isArray(data.objectives) ? data.objectives : [],
+        acceptanceCriteria: Array.isArray(data.acceptanceCriteria) ? data.acceptanceCriteria : [],
+        constraints: Array.isArray(data.constraints) ? data.constraints : [],
+        suggestedAllowedPaths: Array.isArray(data.suggestedAllowedPaths) ? data.suggestedAllowedPaths : [],
+        suggestedForbiddenPaths: Array.isArray(data.suggestedForbiddenPaths) ? data.suggestedForbiddenPaths : [],
+        testFirstRecommended: data.testFirstRecommended === true,
+        openQuestions: Array.isArray(data.openQuestions) ? data.openQuestions : [],
+        rationale: data.rationale || 'Mission inputs synthesized from the goal and repository context.',
+      };
+    } catch (err: any) {
+      console.warn('Mission scaffolding failed:', err);
+      throw new Error(err.message || 'Failed to scaffold mission inputs. Ensure GEMINI_API_KEY is configured.');
     }
   }
 

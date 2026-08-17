@@ -1,6 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { GoalInput, RepoContext, SettingsState } from '../../types';
-import { GeminiService, GeneratedCriteriaResponse } from '../../services/geminiService';
+import {
+  GeminiService,
+  GeneratedCriteriaResponse,
+  GoalScaffold,
+  GoalScaffoldSelection,
+} from '../../services/geminiService';
 import {
   FolderGit2,
   GitBranch,
@@ -31,8 +36,13 @@ interface GoalTabProps {
   onGoalInputChange: (updater: (prev: GoalInput) => GoalInput) => void;
   repoContext: RepoContext | null;
   onFetchRepoContext: () => Promise<void>;
+  onAutoScaffold: () => Promise<void>;
+  scaffoldSuggestions: GoalScaffold | null;
+  onApplyScaffold: (selection: GoalScaffoldSelection) => void;
+  onDismissScaffold: () => void;
   onGeneratePlan: () => Promise<void>;
   isFetchingRepo: boolean;
+  isScaffolding: boolean;
   isGeneratingPlan: boolean;
   settings: SettingsState;
 }
@@ -42,8 +52,13 @@ export const GoalTab: React.FC<GoalTabProps> = ({
   onGoalInputChange,
   repoContext,
   onFetchRepoContext,
+  onAutoScaffold,
+  scaffoldSuggestions,
+  onApplyScaffold,
+  onDismissScaffold,
   onGeneratePlan,
   isFetchingRepo,
+  isScaffolding,
   isGeneratingPlan,
   settings,
 }) => {
@@ -59,6 +74,33 @@ export const GoalTab: React.FC<GoalTabProps> = ({
   const [criteriaSuggestions, setCriteriaSuggestions] = useState<GeneratedCriteriaResponse | null>(null);
   const [selectedCriteria, setSelectedCriteria] = useState<string[]>([]);
   const [criteriaFeedback, setCriteriaFeedback] = useState<string | null>(null);
+
+  // Whole-mission scaffold review state
+  const [selectedScaffoldCriteria, setSelectedScaffoldCriteria] = useState<string[]>([]);
+  const [selectedScaffoldConstraints, setSelectedScaffoldConstraints] = useState<string[]>([]);
+  const [selectedScaffoldAllowedPaths, setSelectedScaffoldAllowedPaths] = useState<string[]>([]);
+  const [selectedScaffoldForbiddenPaths, setSelectedScaffoldForbiddenPaths] = useState<string[]>([]);
+  const [useRefinedGoal, setUseRefinedGoal] = useState(false);
+  const [applyTestFirstRecommendation, setApplyTestFirstRecommendation] = useState(false);
+
+  useEffect(() => {
+    if (!scaffoldSuggestions) {
+      setSelectedScaffoldCriteria([]);
+      setSelectedScaffoldConstraints([]);
+      setSelectedScaffoldAllowedPaths([]);
+      setSelectedScaffoldForbiddenPaths([]);
+      setUseRefinedGoal(false);
+      setApplyTestFirstRecommendation(false);
+      return;
+    }
+
+    setSelectedScaffoldCriteria(scaffoldSuggestions.acceptanceCriteria);
+    setSelectedScaffoldConstraints(scaffoldSuggestions.constraints);
+    setSelectedScaffoldAllowedPaths(scaffoldSuggestions.suggestedAllowedPaths);
+    setSelectedScaffoldForbiddenPaths(scaffoldSuggestions.suggestedForbiddenPaths);
+    setUseRefinedGoal(Boolean(scaffoldSuggestions.refinedGoal.trim()));
+    setApplyTestFirstRecommendation(scaffoldSuggestions.testFirstRecommended);
+  }, [scaffoldSuggestions]);
 
   // Add acceptance criterion item
   const handleAddCriterion = () => {
@@ -147,6 +189,18 @@ export const GoalTab: React.FC<GoalTabProps> = ({
     setCriteriaSuggestions(null);
   };
 
+  const handleApplyScaffold = (replace: boolean) => {
+    onApplyScaffold({
+      useRefinedGoal,
+      acceptanceCriteria: selectedScaffoldCriteria,
+      constraints: selectedScaffoldConstraints,
+      allowedPaths: selectedScaffoldAllowedPaths,
+      forbiddenPaths: selectedScaffoldForbiddenPaths,
+      applyTestFirstRecommendation,
+      replace,
+    });
+  };
+
   // Quick-add suggested constraint from LLM response
   const handleAddSuggestedConstraint = (constraint: string) => {
     if (!goalInput.constraints.includes(constraint)) {
@@ -222,13 +276,15 @@ export const GoalTab: React.FC<GoalTabProps> = ({
       setValidationError('High-level repository goal is required.');
       return;
     }
-    if (!goalInput.acceptanceCriteria || goalInput.acceptanceCriteria.length === 0) {
-      setValidationError('Please provide at least one acceptance criterion.');
-      return;
-    }
-
     await onGeneratePlan();
   };
+
+  const selectedScaffoldCount = selectedScaffoldCriteria.length
+    + selectedScaffoldConstraints.length
+    + selectedScaffoldAllowedPaths.length
+    + selectedScaffoldForbiddenPaths.length
+    + (useRefinedGoal ? 1 : 0)
+    + (applyTestFirstRecommendation ? 1 : 0);
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12">
@@ -342,6 +398,229 @@ export const GoalTab: React.FC<GoalTabProps> = ({
           <p className="text-[10px] text-slate-500">State the primary user outcome or architectural requirement. When Test-First mode is enabled, Gemini generates explicit failing test creation tasks before feature implementation.</p>
         </div>
 
+        {/* Whole-Mission Scaffold Review */}
+        {scaffoldSuggestions && (
+          <div id="mission-scaffold-review" className="p-4 bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 text-slate-100 rounded-xl border border-slate-700 shadow-lg space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <div className="p-1.5 bg-indigo-500 text-white rounded-md shrink-0">
+                  <Wand2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Mission Scaffold Review</h3>
+                  <p className="text-[11px] text-slate-300 mt-0.5">Review the generated objectives, acceptance criteria, constraints, and path boundaries before applying them.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onDismissScaffold}
+                className="p-1 text-slate-400 hover:text-white rounded hover:bg-white/10"
+                title="Dismiss mission scaffold"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-indigo-100 bg-white/5 border border-white/10 rounded-lg px-3 py-2 leading-relaxed">
+              {scaffoldSuggestions.rationale}
+            </p>
+
+            {scaffoldSuggestions.refinedGoal && (
+              <label className="block p-3 bg-white/5 border border-white/10 rounded-lg cursor-pointer">
+                <span className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={useRefinedGoal}
+                    onChange={event => setUseRefinedGoal(event.target.checked)}
+                    className="mt-0.5 rounded text-indigo-500 focus:ring-indigo-500"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-[11px] uppercase tracking-wider font-bold text-indigo-200">Refined goal</span>
+                    <span className="block text-xs text-white leading-relaxed mt-1">{scaffoldSuggestions.refinedGoal}</span>
+                  </span>
+                </span>
+              </label>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <div className="p-3 bg-white/5 border border-white/10 rounded-lg">
+                <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-slate-300 mb-2">
+                  <Target className="w-3.5 h-3.5 text-emerald-300" />
+                  Objectives
+                </div>
+                {scaffoldSuggestions.objectives.length > 0 ? (
+                  <div className="space-y-1.5 text-xs text-slate-200">
+                    {scaffoldSuggestions.objectives.map((objective, index) => (
+                      <div key={`${objective}-${index}`} className="flex items-start gap-2 leading-relaxed">
+                        <span className="text-emerald-300 font-mono">{index + 1}.</span>
+                        <span>{objective}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-xs text-slate-500">No separate objectives returned.</span>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <label className="flex items-start gap-2 p-3 bg-white/5 border border-white/10 rounded-lg cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={applyTestFirstRecommendation}
+                    onChange={event => setApplyTestFirstRecommendation(event.target.checked)}
+                    className="mt-0.5 rounded text-indigo-500 focus:ring-indigo-500"
+                  />
+                  <span>
+                    <span className="block text-[11px] uppercase tracking-wider font-bold text-blue-200">Test-first recommendation</span>
+                    <span className="block text-xs text-slate-300 mt-1">
+                      {scaffoldSuggestions.testFirstRecommended ? 'The goal appears behavior-heavy; enable TDD decomposition.' : 'The model does not recommend TDD for this goal.'}
+                    </span>
+                  </span>
+                </label>
+
+                {scaffoldSuggestions.openQuestions.length > 0 && (
+                  <div className="p-3 bg-amber-400/10 border border-amber-300/20 rounded-lg">
+                    <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-amber-200 mb-1.5">
+                      <Lightbulb className="w-3.5 h-3.5" />
+                      Open Questions
+                    </div>
+                    <div className="space-y-1 text-xs text-amber-100">
+                      {scaffoldSuggestions.openQuestions.map((question, index) => (
+                        <div key={`${question}-${index}`}>• {question}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <div className="p-3 bg-white/5 border border-white/10 rounded-lg">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-slate-300">
+                    <CheckCheck className="w-3.5 h-3.5 text-blue-300" />
+                    Acceptance Criteria
+                  </div>
+                  <span className="text-[10px] text-slate-400">{selectedScaffoldCriteria.length} selected</span>
+                </div>
+                <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                  {scaffoldSuggestions.acceptanceCriteria.map((criterion, index) => {
+                    const selected = selectedScaffoldCriteria.includes(criterion);
+                    return (
+                      <label key={`${criterion}-${index}`} className={`flex items-start gap-2 p-2 rounded-md border cursor-pointer text-xs ${selected ? 'bg-indigo-500/20 border-indigo-300/40 text-white' : 'bg-black/10 border-white/10 text-slate-400'}`}>
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => setSelectedScaffoldCriteria(prev => selected ? prev.filter(item => item !== criterion) : [...prev, criterion])}
+                          className="mt-0.5 rounded text-indigo-500 focus:ring-indigo-500"
+                        />
+                        <span className="leading-relaxed">{criterion}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="p-3 bg-white/5 border border-white/10 rounded-lg">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-slate-300">
+                    <Shield className="w-3.5 h-3.5 text-blue-300" />
+                    Constraints
+                  </div>
+                  <span className="text-[10px] text-slate-400">{selectedScaffoldConstraints.length} selected</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto pr-1">
+                  {scaffoldSuggestions.constraints.map((constraint, index) => {
+                    const selected = selectedScaffoldConstraints.includes(constraint);
+                    return (
+                      <button
+                        key={`${constraint}-${index}`}
+                        type="button"
+                        onClick={() => setSelectedScaffoldConstraints(prev => selected ? prev.filter(item => item !== constraint) : [...prev, constraint])}
+                        className={`inline-flex items-start gap-1 px-2 py-1 rounded-md border text-[11px] text-left ${selected ? 'bg-blue-500/20 border-blue-300/50 text-blue-100' : 'bg-black/10 border-white/10 text-slate-400'}`}
+                      >
+                        {selected && <Check className="w-3 h-3 mt-0.5 shrink-0" />}
+                        <span>{constraint}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <div className="p-3 bg-blue-950/40 border border-blue-300/20 rounded-lg">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="text-[10px] uppercase tracking-wider font-bold text-blue-200">Suggested Allowed Paths</div>
+                  <span className="text-[10px] text-slate-400">{selectedScaffoldAllowedPaths.length} selected</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {scaffoldSuggestions.suggestedAllowedPaths.map((path, index) => {
+                    const selected = selectedScaffoldAllowedPaths.includes(path);
+                    return (
+                      <button
+                        key={`${path}-${index}`}
+                        type="button"
+                        onClick={() => setSelectedScaffoldAllowedPaths(prev => selected ? prev.filter(item => item !== path) : [...prev, path])}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border font-mono text-[11px] ${selected ? 'bg-blue-500/20 border-blue-300/50 text-blue-100' : 'bg-black/10 border-white/10 text-slate-400'}`}
+                      >
+                        {selected && <Check className="w-3 h-3" />}
+                        {path}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="p-3 bg-rose-950/40 border border-rose-300/20 rounded-lg">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="text-[10px] uppercase tracking-wider font-bold text-rose-200">Suggested Forbidden Paths</div>
+                  <span className="text-[10px] text-slate-400">{selectedScaffoldForbiddenPaths.length} selected</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {scaffoldSuggestions.suggestedForbiddenPaths.map((path, index) => {
+                    const selected = selectedScaffoldForbiddenPaths.includes(path);
+                    return (
+                      <button
+                        key={`${path}-${index}`}
+                        type="button"
+                        onClick={() => setSelectedScaffoldForbiddenPaths(prev => selected ? prev.filter(item => item !== path) : [...prev, path])}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border font-mono text-[11px] ${selected ? 'bg-rose-500/20 border-rose-300/50 text-rose-100' : 'bg-black/10 border-white/10 text-slate-400'}`}
+                      >
+                        {selected && <Check className="w-3 h-3" />}
+                        {path}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-white/10">
+              <span className="text-[11px] text-slate-400">{selectedScaffoldCount} selected inputs will be applied.</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleApplyScaffold(true)}
+                  disabled={selectedScaffoldCount === 0}
+                  className="px-3 py-1.5 bg-white/10 hover:bg-white/15 disabled:opacity-40 text-white border border-white/20 rounded-lg text-xs font-semibold"
+                >
+                  Replace Selected
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleApplyScaffold(false)}
+                  disabled={selectedScaffoldCount === 0}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-500 hover:bg-indigo-400 disabled:opacity-40 text-white rounded-lg text-xs font-semibold"
+                >
+                  <CheckCheck className="w-3.5 h-3.5" />
+                  Merge Selected
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Acceptance Criteria */}
         <div className="space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
@@ -355,6 +634,30 @@ export const GoalTab: React.FC<GoalTabProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
+              <button
+                id="btn-auto-scaffold-mission"
+                type="button"
+                onClick={onAutoScaffold}
+                disabled={isScaffolding || !goalInput.goal.trim() || !goalInput.repo.trim()}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-all ${
+                  isScaffolding || !goalInput.goal.trim() || !goalInput.repo.trim()
+                    ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                    : 'bg-slate-900 hover:bg-slate-800 text-white shadow-slate-900/20 active:scale-95'
+                }`}
+                title={!goalInput.repo.trim() ? 'Enter a repository first' : !goalInput.goal.trim() ? 'Enter a high-level goal first' : 'Generate a reviewable mission scaffold'}
+              >
+                {isScaffolding ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Scaffolding...</span>
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Auto-Scaffold Mission</span>
+                  </>
+                )}
+              </button>
               <button
                 id="btn-autogenerate-criteria"
                 type="button"

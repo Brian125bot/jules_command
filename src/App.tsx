@@ -19,7 +19,7 @@ import { ReportTab } from './components/tabs/ReportTab';
 import { SettingsTab } from './components/tabs/SettingsTab';
 import { GitHubService } from './services/githubService';
 import { JulesService } from './services/julesService';
-import { GeminiService } from './services/geminiService';
+import { GeminiService, GoalScaffold, GoalScaffoldSelection } from './services/geminiService';
 
 const EMPTY_GOAL_INPUT: GoalInput = {
   repo: '',
@@ -30,6 +30,27 @@ const EMPTY_GOAL_INPUT: GoalInput = {
   allowedPaths: [],
   forbiddenPaths: [],
   mode: 'live',
+};
+
+const uniqueValues = (values: string[]) => Array.from(new Set(values.map(value => value.trim()).filter(Boolean)));
+
+const applyGoalScaffold = (
+  input: GoalInput,
+  scaffold: GoalScaffold,
+  selection: GoalScaffoldSelection,
+): GoalInput => {
+  const updateList = (current: string[], suggested: string[]) =>
+    selection.replace && suggested.length > 0 ? uniqueValues(suggested) : uniqueValues([...current, ...suggested]);
+
+  return {
+    ...input,
+    goal: selection.useRefinedGoal && scaffold.refinedGoal.trim() ? scaffold.refinedGoal.trim() : input.goal,
+    acceptanceCriteria: updateList(input.acceptanceCriteria, selection.acceptanceCriteria),
+    constraints: updateList(input.constraints, selection.constraints),
+    allowedPaths: updateList(input.allowedPaths, selection.allowedPaths),
+    forbiddenPaths: updateList(input.forbiddenPaths, selection.forbiddenPaths),
+    testFirstMode: selection.applyTestFirstRecommendation ? true : input.testFirstMode,
+  };
 };
 
 export default function App() {
@@ -45,8 +66,10 @@ export default function App() {
   // Loading states
   const [isFetchingRepo, setIsFetchingRepo] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [isScaffolding, setIsScaffolding] = useState(false);
   const [isExecutingAll, setIsExecutingAll] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [scaffoldSuggestions, setScaffoldSuggestions] = useState<GoalScaffold | null>(null);
 
   // Toast / notification
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'info' | 'success' | 'warning' } | null>(null);
@@ -64,12 +87,13 @@ export default function App() {
     setExecutionQueue([]);
     setVerificationResult(null);
     setBranchDiff(null);
+    setScaffoldSuggestions(null);
     setActiveTab('goal');
     showToast('Workspace reset. Enter a new mission to begin.', 'info');
   };
 
   // Fetch Repo Context
-  const handleFetchRepoContext = async () => {
+  const loadRepoContext = async (showFeedback = true): Promise<RepoContext> => {
     setIsFetchingRepo(true);
     try {
       const context = await GitHubService.fetchRepoContext({
@@ -79,21 +103,127 @@ export default function App() {
         baseUrl: settings.githubBaseUrl,
       });
       setRepoContext(context);
-      showToast(`Repository context loaded for ${goalInput.repo}`, 'success');
+      if (showFeedback) {
+        showToast(`Repository context loaded for ${goalInput.repo}`, 'success');
+      }
+      return context;
     } catch (err: any) {
-      showToast(err.message || 'Failed to fetch repository context', 'warning');
+      if (showFeedback) {
+        showToast(err.message || 'Failed to fetch repository context', 'warning');
+      }
+      throw err;
     } finally {
       setIsFetchingRepo(false);
     }
+  };
+
+  const handleFetchRepoContext = async () => {
+    try {
+      await loadRepoContext();
+    } catch {
+      // The helper already reports the live API error to the operator.
+    }
+  };
+
+  const requestGoalScaffold = async (context: RepoContext | null): Promise<GoalScaffold> =>
+    GeminiService.generateGoalScaffold({
+      goal: goalInput.goal,
+      repo: goalInput.repo,
+      baseBranch: goalInput.baseBranch,
+      repoContext: context,
+      existingCriteria: goalInput.acceptanceCriteria,
+      constraints: goalInput.constraints,
+      allowedPaths: goalInput.allowedPaths,
+      forbiddenPaths: goalInput.forbiddenPaths,
+      testFirstMode: goalInput.testFirstMode,
+      settings,
+    });
+
+  const handleAutoScaffold = async () => {
+    if (!goalInput.repo.trim() || !goalInput.goal.trim()) {
+      showToast('Enter a repository and high-level goal before scaffolding.', 'warning');
+      return;
+    }
+
+    setIsScaffolding(true);
+    try {
+      let context = repoContext;
+      if (!context) {
+        try {
+          context = await loadRepoContext(false);
+        } catch (err: any) {
+          showToast(err.message || 'Repository context unavailable; generating generic path suggestions.', 'warning');
+        }
+      }
+
+      const scaffold = await requestGoalScaffold(context);
+      setScaffoldSuggestions(scaffold);
+      showToast('Mission scaffold generated. Review the suggested inputs before applying them.', 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to scaffold mission inputs', 'warning');
+    } finally {
+      setIsScaffolding(false);
+    }
+  };
+
+  const handleApplyScaffold = (selection: GoalScaffoldSelection) => {
+    if (!scaffoldSuggestions) return;
+    setGoalInput(prev => applyGoalScaffold(prev, scaffoldSuggestions, selection));
+    setScaffoldSuggestions(null);
+    showToast(selection.replace ? 'Selected scaffold inputs replaced the current mission fields.' : 'Selected scaffold inputs added to the mission.', 'success');
   };
 
   // Generate Plan via Gemini
   const handleGeneratePlan = async () => {
     setIsGeneratingPlan(true);
     try {
+      let activeGoalInput = goalInput;
+      let activeRepoContext = repoContext;
+
+      if (!activeRepoContext) {
+        try {
+          activeRepoContext = await loadRepoContext(false);
+        } catch (err: any) {
+          showToast(err.message || 'Repository context unavailable; continuing without repository-aware suggestions.', 'warning');
+        }
+      }
+
+      const needsScaffold = activeGoalInput.acceptanceCriteria.length === 0
+        || activeGoalInput.constraints.length === 0
+        || activeGoalInput.allowedPaths.length === 0
+        || activeGoalInput.forbiddenPaths.length === 0;
+
+      if (needsScaffold) {
+        const scaffold = await GeminiService.generateGoalScaffold({
+          goal: activeGoalInput.goal,
+          repo: activeGoalInput.repo,
+          baseBranch: activeGoalInput.baseBranch,
+          repoContext: activeRepoContext,
+          existingCriteria: activeGoalInput.acceptanceCriteria,
+          constraints: activeGoalInput.constraints,
+          allowedPaths: activeGoalInput.allowedPaths,
+          forbiddenPaths: activeGoalInput.forbiddenPaths,
+          testFirstMode: activeGoalInput.testFirstMode,
+          settings,
+        });
+        const autoSelection: GoalScaffoldSelection = {
+          useRefinedGoal: true,
+          acceptanceCriteria: scaffold.acceptanceCriteria,
+          constraints: scaffold.constraints,
+          allowedPaths: scaffold.suggestedAllowedPaths,
+          forbiddenPaths: scaffold.suggestedForbiddenPaths,
+          applyTestFirstRecommendation: scaffold.testFirstRecommended,
+          replace: false,
+        };
+        activeGoalInput = applyGoalScaffold(activeGoalInput, scaffold, autoSelection);
+        setGoalInput(activeGoalInput);
+        setScaffoldSuggestions(scaffold);
+        showToast('Missing mission inputs were scaffolded automatically before planning.', 'info');
+      }
+
       const generatedPlan = await GeminiService.decomposeGoal({
-        goalInput,
-        repoContext,
+        goalInput: activeGoalInput,
+        repoContext: activeRepoContext,
         settings,
       });
 
@@ -110,7 +240,7 @@ export default function App() {
 
       // Seed initial execution queue items
       const initialQueue: ExecutionItem[] = tasksWithApprovals.map(t => {
-        const slug = goalInput.goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 20);
+        const slug = activeGoalInput.goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 20);
         return {
           taskId: t.id,
           taskTitle: t.title,
@@ -377,8 +507,13 @@ export default function App() {
             onGoalInputChange={setGoalInput}
             repoContext={repoContext}
             onFetchRepoContext={handleFetchRepoContext}
+            onAutoScaffold={handleAutoScaffold}
+            scaffoldSuggestions={scaffoldSuggestions}
+            onApplyScaffold={handleApplyScaffold}
+            onDismissScaffold={() => setScaffoldSuggestions(null)}
             onGeneratePlan={handleGeneratePlan}
             isFetchingRepo={isFetchingRepo}
+            isScaffolding={isScaffolding}
             isGeneratingPlan={isGeneratingPlan}
             settings={settings}
           />

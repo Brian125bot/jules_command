@@ -95,6 +95,57 @@ Autogenerates testable, unambiguous acceptance criteria and suggested constraint
 
 ---
 
+### `POST /api/gemini/scaffold-goal`
+Builds a reviewable mission specification from an initial goal. It generates a refined goal, objectives, acceptance criteria, engineering constraints, repository-aware path boundaries, a test-first recommendation, and open questions.
+
+#### Request Body
+```json
+{
+  "goal": "Add CSV export to analytics dashboard so users can download metrics",
+  "repo": "acme/dashboard",
+  "baseBranch": "main",
+  "repoContext": { ... },
+  "existingCriteria": [],
+  "constraints": [],
+  "allowedPaths": [],
+  "forbiddenPaths": [],
+  "defaultForbiddenPaths": [".github/workflows/", "infrastructure/", "secrets/"],
+  "testFirstMode": false,
+  "model": "gemini-3.7-flash",
+  "temperature": 0.2
+}
+```
+
+#### Response `200 OK`
+```json
+{
+  "refinedGoal": "Enable users to download the currently visible analytics metrics as a valid CSV file.",
+  "objectives": [
+    "Expose CSV export for the current analytics view",
+    "Preserve filtering and empty-state behavior during export"
+  ],
+  "acceptanceCriteria": [
+    "The export control is available from the analytics view",
+    "Generated output escapes commas, quotes, and line breaks correctly",
+    "Empty and filtered datasets produce valid, predictable CSV output",
+    "Tests cover serialization edge cases and the user-facing trigger"
+  ],
+  "constraints": [
+    "Do not modify authentication, deployment, or workflow configuration",
+    "Keep the export implementation within the existing client-side data flow"
+  ],
+  "suggestedAllowedPaths": ["src/components/analytics/", "src/utils/", "tests/"],
+  "suggestedForbiddenPaths": [".github/workflows/", "infrastructure/", "secrets/"],
+  "testFirstRecommended": true,
+  "openQuestions": [],
+  "rationale": "The scaffold focuses on observable export behavior and limits changes to the existing analytics and test areas."
+}
+```
+
+The endpoint requires `GEMINI_API_KEY` and always preserves the supplied baseline forbidden paths.
+
+---
+
 ### `POST /api/gemini/plan`
 Decomposes a high-level goal into structured discrete tasks.
 

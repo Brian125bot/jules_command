@@ -57,6 +57,7 @@ Modern autonomous software engineering requires more than sending code prompts i
   - Strict filesystem guardrails (`expected_paths`, `forbidden_paths`).
   - High-precision prompts tailored for agent execution.
 - **Test-First (TDD) Mode**: Splits feature requests into explicit failing test creation tasks followed by implementation tasks.
+- **Mission Scaffolding**: Converts an initial goal into reviewed objectives, acceptance criteria, constraints, repository-aware path boundaries, and a test-first recommendation. The plan action can run this automatically when mission fields are missing.
 
 ### 2. Autonomous Execution with Jules Engine
 - Live-only dispatch to the **Google Jules API** — every task is a real, remotely-executed session; there is no simulated or demo execution path.

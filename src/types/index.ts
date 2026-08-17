@@ -26,7 +26,7 @@ export interface GoalInput {
   constraints: string[];
   allowedPaths: string[];
   forbiddenPaths: string[];
-  mode: 'demo' | 'live';
+  mode: 'live';
   testFirstMode?: boolean; // v1: split feature tasks into failing test + implementation
 }
 
@@ -42,7 +42,6 @@ export interface RepoContext {
   manifestContent?: string;
   rawReadmeSnippet?: string;
   fetchedAt?: string;
-  isMock?: boolean;
   cached?: boolean;
 }
 
@@ -170,7 +169,7 @@ export interface SettingsState {
   githubBaseUrl: string;
   julesApiKey: string;
   julesBaseUrl: string;
-  julesMode?: 'mock' | 'live';
+  julesMode: 'live';
   maxAutoRepairs: number;
   requireHumanForHighRisk: boolean;
   requireCiPass: boolean;

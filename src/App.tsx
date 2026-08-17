@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   GoalInput,
   PlanResponse,
@@ -9,13 +9,7 @@ import {
   SettingsState,
   RepoContext,
 } from './types';
-import {
-  DEFAULT_SETTINGS,
-  SAMPLE_GOAL_PRESETS,
-  MOCK_REPO_CONTEXT,
-  MOCK_BRANCH_DIFF,
-  MOCK_VERIFICATION_RESULT,
-} from './data/mockData';
+import { DEFAULT_SETTINGS } from './data/defaultSettings';
 import { Navbar, TabKey } from './components/Navbar';
 import { GoalTab } from './components/tabs/GoalTab';
 import { PlanTab } from './components/tabs/PlanTab';
@@ -27,14 +21,25 @@ import { GitHubService } from './services/githubService';
 import { JulesService } from './services/julesService';
 import { GeminiService } from './services/geminiService';
 
+const EMPTY_GOAL_INPUT: GoalInput = {
+  repo: '',
+  baseBranch: 'main',
+  goal: '',
+  acceptanceCriteria: [],
+  constraints: [],
+  allowedPaths: [],
+  forbiddenPaths: [],
+  mode: 'live',
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabKey>('goal');
-  const [goalInput, setGoalInput] = useState<GoalInput>(SAMPLE_GOAL_PRESETS[0].data);
-  const [repoContext, setRepoContext] = useState<RepoContext | null>(MOCK_REPO_CONTEXT);
+  const [goalInput, setGoalInput] = useState<GoalInput>(EMPTY_GOAL_INPUT);
+  const [repoContext, setRepoContext] = useState<RepoContext | null>(null);
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [executionQueue, setExecutionQueue] = useState<ExecutionItem[]>([]);
   const [verificationResult, setVerificationResult] = useState<FullVerificationResult | null>(null);
-  const [branchDiff, setBranchDiff] = useState<BranchDiff | null>(MOCK_BRANCH_DIFF);
+  const [branchDiff, setBranchDiff] = useState<BranchDiff | null>(null);
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
 
   // Loading states
@@ -51,38 +56,16 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Polling tracker for running Jules tasks
-  const pollingIntervals = useRef<Map<string, NodeJS.Timeout>>(new Map());
-
-  // Clean up polling intervals on unmount
-  useEffect(() => {
-    return () => {
-      pollingIntervals.current.forEach(timer => clearInterval(timer));
-      pollingIntervals.current.clear();
-    };
-  }, []);
-
-  // Preset Selection
-  const handleSelectPreset = (preset: GoalInput) => {
-    setGoalInput(preset);
-    setRepoContext(MOCK_REPO_CONTEXT);
-    setPlan(null);
-    setExecutionQueue([]);
-    setVerificationResult(null);
-    setActiveTab('goal');
-    showToast(`Loaded preset goal: "${preset.goal.slice(0, 45)}..."`, 'info');
-  };
-
   // Reset workspace
   const handleResetWorkspace = () => {
-    setGoalInput(SAMPLE_GOAL_PRESETS[0].data);
+    setGoalInput(EMPTY_GOAL_INPUT);
     setRepoContext(null);
     setPlan(null);
     setExecutionQueue([]);
     setVerificationResult(null);
     setBranchDiff(null);
     setActiveTab('goal');
-    showToast('Workspace reset to defaults.', 'info');
+    showToast('Workspace reset. Enter a new mission to begin.', 'info');
   };
 
   // Fetch Repo Context
@@ -94,7 +77,6 @@ export default function App() {
         baseBranch: goalInput.baseBranch,
         token: settings.githubToken,
         baseUrl: settings.githubBaseUrl,
-        mode: goalInput.mode,
       });
       setRepoContext(context);
       showToast(`Repository context loaded for ${goalInput.repo}`, 'success');
@@ -183,53 +165,6 @@ export default function App() {
     showToast('High-risk tasks marked for explicit operator review.', 'info');
   };
 
-  // Start polling a specific Jules task until completion
-  const startTaskPolling = (taskId: string, julesTaskId: string) => {
-    if (pollingIntervals.current.has(taskId)) {
-      clearInterval(pollingIntervals.current.get(taskId)!);
-    }
-
-    const interval = setInterval(async () => {
-      try {
-        const statusRes = await JulesService.getTaskStatus({
-          taskId: julesTaskId,
-          apiKey: settings.julesApiKey,
-          baseUrl: settings.julesBaseUrl,
-        });
-
-        setExecutionQueue(prev =>
-          prev.map(item => {
-            if (item.taskId === taskId) {
-              return {
-                ...item,
-                status: statusRes.status,
-                progress: statusRes.progress,
-                currentStage: statusRes.currentStage,
-                logs: statusRes.logs || item.logs,
-                error: statusRes.error,
-              };
-            }
-            return item;
-          })
-        );
-
-        if (statusRes.status === 'completed' || statusRes.status === 'failed' || statusRes.status === 'cancelled') {
-          clearInterval(interval);
-          pollingIntervals.current.delete(taskId);
-          if (statusRes.status === 'completed') {
-            showToast(`Jules task ${taskId} completed successfully!`, 'success');
-          } else if (statusRes.status === 'failed') {
-            showToast(`Jules task ${taskId} failed. Check execution logs.`, 'warning');
-          }
-        }
-      } catch {
-        // Continue polling
-      }
-    }, 1500);
-
-    pollingIntervals.current.set(taskId, interval);
-  };
-
   // Execute a single task
   const handleExecuteTask = async (taskId: string, forceHighRisk: boolean = false) => {
     if (!plan) return;
@@ -246,7 +181,7 @@ export default function App() {
               ...item,
               status: 'submitted',
               progress: 5,
-              currentStage: 'Submitting sandbox job to Jules API...',
+              currentStage: 'Submitting session to Jules API...',
               logs: [`[${new Date().toLocaleTimeString()}] Submitting task ${taskId} to Jules agent...`],
             }
           : item
@@ -261,7 +196,6 @@ export default function App() {
         branchName,
         apiKey: settings.julesApiKey,
         baseUrl: settings.julesBaseUrl,
-        mode: goalInput.mode,
       });
 
       setExecutionQueue(prev =>
@@ -272,13 +206,17 @@ export default function App() {
                 julesTaskId: res.taskId,
                 status: 'running',
                 progress: 15,
-                currentStage: 'Cloning repository into isolated container...',
+                currentStage: 'Session dispatched to Jules — track progress at jules.google',
+                logs: [
+                  ...(item.logs || []),
+                  `[${new Date().toLocaleTimeString()}] Session ${res.taskId} created. Monitoring live at jules.google.`,
+                ],
               }
             : item
         )
       );
 
-      startTaskPolling(taskId, res.taskId);
+      showToast(`Session ${res.taskId} dispatched to Jules. Track it at jules.google.`, 'success');
     } catch (err: any) {
       setExecutionQueue(prev =>
         prev.map(item =>
@@ -310,31 +248,6 @@ export default function App() {
     showToast(`Dispatched ${approvedTasks.length} tasks to Jules execution queue.`, 'info');
   };
 
-  // Cancel running task
-  const handleCancelTask = async (taskId: string) => {
-    const item = executionQueue.find(i => i.taskId === taskId);
-    if (!item || !item.julesTaskId) return;
-
-    if (pollingIntervals.current.has(taskId)) {
-      clearInterval(pollingIntervals.current.get(taskId)!);
-      pollingIntervals.current.delete(taskId);
-    }
-
-    try {
-      await JulesService.cancelTask({
-        taskId: item.julesTaskId,
-        apiKey: settings.julesApiKey,
-        baseUrl: settings.julesBaseUrl,
-      });
-      setExecutionQueue(prev =>
-        prev.map(i => (i.taskId === taskId ? { ...i, status: 'cancelled', currentStage: 'Execution cancelled by operator' } : i))
-      );
-      showToast(`Task ${taskId} cancelled.`, 'info');
-    } catch {
-      showToast(`Unable to cancel task ${taskId}`, 'warning');
-    }
-  };
-
   // Retry task
   const handleRetryTask = async (taskId: string) => {
     await handleExecuteTask(taskId);
@@ -351,7 +264,6 @@ export default function App() {
         head: headBranch,
         token: settings.githubToken,
         baseUrl: settings.githubBaseUrl,
-        mode: goalInput.mode,
       });
       setBranchDiff(diff);
 
@@ -361,7 +273,6 @@ export default function App() {
         ref: headBranch,
         token: settings.githubToken,
         baseUrl: settings.githubBaseUrl,
-        mode: goalInput.mode,
       });
 
       // 3. Run semantic verification via Gemini
@@ -427,8 +338,6 @@ export default function App() {
       <Navbar
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        goalInput={goalInput}
-        onSelectPreset={handleSelectPreset}
         onResetWorkspace={handleResetWorkspace}
         isExecuting={isExecuting}
       />
@@ -437,7 +346,7 @@ export default function App() {
       <div className="bg-white border-b border-slate-200 h-14 flex items-center justify-between px-4 sm:px-6 lg:px-8 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           <span className="text-xs font-mono bg-slate-100 px-2.5 py-1 rounded text-slate-700 font-semibold border border-slate-200/80 shrink-0">
-            {goalInput.repo || 'acme/analytics-api'}
+            {goalInput.repo || '—'}
           </span>
           <span className="text-slate-300">/</span>
           <span className="text-xs font-semibold text-slate-800 truncate">
@@ -445,19 +354,9 @@ export default function App() {
           </span>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          <div
-            className={`flex items-center px-3 py-1 rounded-full text-[10px] font-bold border uppercase tracking-tight ${
-              goalInput.mode === 'live'
-                ? 'bg-blue-50 text-blue-700 border-blue-200'
-                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-            }`}
-          >
-            <div
-              className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
-                goalInput.mode === 'live' ? 'bg-blue-500 animate-pulse' : 'bg-emerald-500 animate-pulse'
-              }`}
-            />
-            {goalInput.mode === 'live' ? 'Live Mode Active' : 'Demo Mode Active'}
+          <div className="flex items-center px-3 py-1 rounded-full text-[10px] font-bold border uppercase tracking-tight bg-blue-50 text-blue-700 border-blue-200">
+            <div className="w-1.5 h-1.5 rounded-full mr-1.5 bg-blue-500 animate-pulse" />
+            Live Mode Active
           </div>
           {activeTab === 'plan' && plan && plan.tasks.length > 0 && (
             <button
@@ -506,7 +405,6 @@ export default function App() {
             settings={settings}
             onExecuteTask={handleExecuteTask}
             onExecuteAllApproved={handleExecuteAllApproved}
-            onCancelTask={handleCancelTask}
             onRetryTask={handleRetryTask}
             onProceedToVerify={handleProceedToVerify}
             isExecutingAll={isExecutingAll}

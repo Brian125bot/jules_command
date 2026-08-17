@@ -36,10 +36,15 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     setIsTesting(true);
     setTestStatus(null);
     try {
-      if (!settings.githubToken) {
-        setTestStatus('Using anonymous / Demo Mode API access (rate limits apply).');
+      if (!settings.githubToken || !settings.githubToken.trim()) {
+        setTestStatus('No GitHub token configured. A token is required for live mode.');
+        return;
+      }
+      const data = await GitHubService.testConnection(settings.githubToken, settings.githubBaseUrl);
+      if (data.success) {
+        setTestStatus(`Connected as ${data.user?.login || 'user'} — credentials operational.`);
       } else {
-        setTestStatus('GitHub token validated! Credentials operational.');
+        setTestStatus(data.message || 'Connection failed. Please check your token and network.');
       }
     } catch {
       setTestStatus('Connection failed. Please check your token and network.');
@@ -138,7 +143,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
               className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600"
             />
-            <span className="text-[10px] text-slate-500 block">Leave blank for unauthenticated public repo access or Demo Mode.</span>
+            <span className="text-[10px] text-slate-500 block">Required for live mode. Use a fine-grained PAT with <code>contents:read</code> and <code>pull_requests:write</code> scopes.</span>
           </div>
 
           <div className="space-y-1.5">
@@ -197,7 +202,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               type="text"
               value={settings.julesBaseUrl}
               onChange={e => onUpdateSettings(prev => ({ ...prev, julesBaseUrl: e.target.value }))}
-              placeholder="https://api.jules.ai/v1"
+              placeholder="https://jules.googleapis.com"
               className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600"
             />
           </div>

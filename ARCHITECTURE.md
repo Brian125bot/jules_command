@@ -33,9 +33,9 @@ Jules RepoMission Studio operates on a **modular client-server model**:
 |         |                                  |                           |          |
 |         v                                  v                           v          |
 |  GitHub REST Proxy                  Gemini API Engine           Jules API Gateway |
-|  - Compare diffs                    - JSON Schemas              - Task queue      |
-|  - Raw patch extractor              - Plan SSE Streaming        - State polling   |
-|  - PR & comment poster              - CoT Verification          - Log stream      |
+|  - Compare diffs                    - JSON Schemas              - Session dispatch |
+|  - Raw patch extractor              - Plan SSE Streaming        - jules.google     |
+|  - PR & comment poster              - CoT Verification            tracking link   |
 +---------|----------------------------------|---------------------------|----------+
           |                                  |                           |
           v                                  v                           v
@@ -70,8 +70,8 @@ The application enforces a deterministic progression across 5 primary phases:
   v [Approve & Dispatch]
 (3. AGENT EXECUTION)
   - Branch creation: `jules/<task-id>-<hash>`
-  - Payload formulation & submission to Jules API
-  - Real-time polling & terminal log streaming
+  - Payload formulation & live session dispatch to the Jules API
+  - Progress tracked at jules.google using the returned session id
   - States: `queued` -> `jules_running` -> `completed` / `failed`
   |
   v [Execution Finished]

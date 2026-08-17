@@ -3,7 +3,6 @@ import { ExecutionItem, PlanTask, GoalInput, SettingsState } from '../../types';
 import {
   Play,
   RotateCw,
-  XCircle,
   Terminal,
   FileCode,
   ShieldCheck,
@@ -26,7 +25,6 @@ interface ExecuteTabProps {
   settings: SettingsState;
   onExecuteTask: (taskId: string, forceHighRisk?: boolean) => Promise<void>;
   onExecuteAllApproved: () => Promise<void>;
-  onCancelTask: (taskId: string) => Promise<void>;
   onRetryTask: (taskId: string) => Promise<void>;
   onProceedToVerify: (branchName: string) => void;
   isExecutingAll: boolean;
@@ -39,7 +37,6 @@ export const ExecuteTab: React.FC<ExecuteTabProps> = ({
   settings,
   onExecuteTask,
   onExecuteAllApproved,
-  onCancelTask,
   onRetryTask,
   onProceedToVerify,
   isExecutingAll,
@@ -123,7 +120,7 @@ export const ExecuteTab: React.FC<ExecuteTabProps> = ({
           <div className="p-3 bg-blue-50/60 rounded-lg border border-blue-200">
             <span className="text-blue-700 block text-[10px] uppercase font-bold">Agent Mode</span>
             <span className="text-sm font-bold text-blue-900">
-              {goalInput.mode === 'live' ? 'Live API' : 'Simulated Sandbox'}
+              Live API
             </span>
           </div>
         </div>
@@ -283,18 +280,6 @@ export const ExecuteTab: React.FC<ExecuteTabProps> = ({
                     >
                       <Play className="w-3.5 h-3.5" />
                       Launch Jules Task
-                    </button>
-                  )}
-
-                  {isRunning && (
-                    <button
-                      id={`btn-cancel-task-${task.id}`}
-                      type="button"
-                      onClick={() => onCancelTask(task.id)}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded font-semibold transition-colors"
-                    >
-                      <XCircle className="w-3.5 h-3.5" />
-                      Cancel
                     </button>
                   )}
 

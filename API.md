@@ -249,7 +249,7 @@ Synthesizes a minimal corrective repair prompt for failed tasks or regressions.
 ## 🤖 3. Jules Agent Endpoints
 
 ### `POST /api/jules/task/create`
-Submits a coding task to the Jules agent runtime or local mock simulator.
+Dispatches a coding task as a live session to the Google Jules API.
 
 #### Request Body
 ```json
@@ -266,48 +266,29 @@ Submits a coding task to the Jules agent runtime or local mock simulator.
     "task_id": "TASK-1",
     "title": "Implement CSV Export Utility"
   },
-  "julesBaseUrl": "https://api.jules.ai/v1",
-  "mode": "live"
+  "julesBaseUrl": "https://jules.googleapis.com"
 }
 ```
+
+#### Headers
+- `X-Jules-Api-Key`: (Required) Google Jules API key. The server proxies the request to `${julesBaseUrl}/v1alpha/sessions` using this key.
 
 #### Response `200 OK`
 ```json
 {
-  "taskId": "jules_live_987213456",
+  "taskId": "abc123-def456",
   "status": "jules_running",
   "isLive": true,
-  "message": "Task queued in Jules runtime"
+  "message": "Task successfully submitted to Jules Live API",
+  "liveData": { "name": "sessions/abc123-def456", "state": "WORKING" }
 }
 ```
 
----
+Progress can be tracked at `https://jules.google` using the returned session id.
 
-### `GET /api/jules/task/:id`
-Polls the execution state, progress percentage, and log history of a Jules task.
-
-#### Response `200 OK`
-```json
-{
-  "id": "jules_live_987213456",
-  "status": "passed",
-  "progress": 100,
-  "currentStage": "Task verified and tests passed",
-  "logs": [
-    "[13:42:01] Initializing container runtime...",
-    "[13:42:04] Checking out branch jules/task-1-csv-export...",
-    "[13:42:08] Applying code modifications to src/utils/csv.ts...",
-    "[13:42:15] Running vitest run tests/csv.test.ts (2 tests passed)...",
-    "[13:42:18] Generated git diff patch (45 additions, 0 deletions)"
-  ],
-  "diff": {
-    "files": [ ... ],
-    "totalAdditions": 45,
-    "totalDeletions": 0,
-    "totalFiles": 1
-  }
-}
-```
+#### Error Responses
+- `400` — missing `JULES_API_KEY` (live mode only).
+- `5xx` — the Jules API rejected or was unreachable for the request.
 
 ---
 

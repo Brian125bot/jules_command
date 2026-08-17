@@ -1,5 +1,4 @@
 import { GoalInput, RepoContext, PlanResponse, PlanTask, BranchDiff, FullVerificationResult, SettingsState, CiVerification } from '../types';
-import { MOCK_PLAN_RESPONSE, MOCK_VERIFICATION_RESULT } from '../data/mockData';
 
 export interface DecomposeGoalParams {
   goalInput: GoalInput;
@@ -70,18 +69,8 @@ export class GeminiService {
         suggestedConstraints: data.suggestedConstraints || [],
       };
     } catch (err: any) {
-      console.warn('Acceptance criteria generation fallback:', err);
-      // Fallback
-      return {
-        criteria: [
-          `Primary functional requirement is fully implemented: ${params.goal.slice(0, 60)}`,
-          'All edge cases, null inputs, and error states return appropriate feedback',
-          'Automated unit tests added in tests/ directory with complete assertions',
-          'No regressions introduced in existing components or routes',
-        ],
-        rationale: 'Generated fallback criteria following testing best practices.',
-        suggestedConstraints: ['Ensure zero modifications to .github/workflows/'],
-      };
+      console.warn('Acceptance criteria generation failed:', err);
+      throw new Error(err.message || 'Failed to generate acceptance criteria. Ensure GEMINI_API_KEY is configured.');
     }
   }
 
@@ -151,9 +140,9 @@ export class GeminiService {
         throw new Error(data.error || 'Failed to generate plan from Gemini');
       }
       return data;
-    } catch {
-      // Fallback for demo mode
-      return MOCK_PLAN_RESPONSE;
+    } catch (err: any) {
+      console.warn('Plan generation failed:', err);
+      throw new Error(err.message || 'Failed to generate plan. Ensure GEMINI_API_KEY is configured.');
     }
   }
 
@@ -193,12 +182,9 @@ export class GeminiService {
         throw new Error(data.error || 'Failed to run verification on branch diff');
       }
       return data;
-    } catch {
-      return {
-        structural: MOCK_VERIFICATION_RESULT.structural,
-        semantic: MOCK_VERIFICATION_RESULT.semantic,
-        overallAction: MOCK_VERIFICATION_RESULT.overallAction,
-      };
+    } catch (err: any) {
+      console.warn('Verification failed:', err);
+      throw new Error(err.message || 'Failed to run verification on branch diff. Ensure GEMINI_API_KEY is configured.');
     }
   }
 
@@ -264,18 +250,8 @@ export class GeminiService {
         throw new Error(data.error || 'Failed to generate repair prompt');
       }
       return data.repairPrompt;
-    } catch {
-      return `REPAIR INSTRUCTION:
-The previous change failed the following criteria:
-${failedCriteria.map(c => `- ${c}`).join('\n')}
-
-Identified issues:
-${issues.map(i => `- ${i}`).join('\n')}
-
-Mandates:
-- Apply the minimal corrective code change to pass the failed criteria.
-- Update tests in tests/ to assert the fix.
-- Do not modify forbidden paths.`;
+    } catch (err: any) {
+      throw new Error(err.message || 'Failed to generate repair prompt. Ensure GEMINI_API_KEY is configured.');
     }
   }
 

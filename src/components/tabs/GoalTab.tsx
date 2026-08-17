@@ -248,30 +248,10 @@ export const GoalTab: React.FC<GoalTabProps> = ({
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
-            <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-1 flex items-center gap-1">
-              <button
-                id="btn-mode-demo"
-                onClick={() => onGoalInputChange(prev => ({ ...prev, mode: 'demo' }))}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
-                  goalInput.mode === 'demo'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Demo Mode
-              </button>
-              <button
-                id="btn-mode-live"
-                onClick={() => onGoalInputChange(prev => ({ ...prev, mode: 'live' }))}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
-                  goalInput.mode === 'live'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Live Mode
-              </button>
-            </div>
+            <span className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold">
+              <Zap className="w-3.5 h-3.5" />
+              Live Mode
+            </span>
           </div>
         </div>
 
@@ -817,11 +797,6 @@ export const GoalTab: React.FC<GoalTabProps> = ({
               <div>
                 <div className="text-xs font-bold text-white flex items-center gap-2">
                   <span>Repository Context Summary</span>
-                  {repoContext.isMock && (
-                    <span className="text-[10px] px-1.5 py-0.5 bg-slate-800 text-slate-300 border border-slate-700 rounded">
-                      Demo Cache
-                    </span>
-                  )}
                 </div>
                 <div className="text-[11px] text-slate-400">
                   {repoContext.manifestType} • Default branch: <span className="font-mono text-slate-300">{repoContext.defaultBranch}</span>

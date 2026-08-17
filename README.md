@@ -59,9 +59,8 @@ Modern autonomous software engineering requires more than sending code prompts i
 - **Test-First (TDD) Mode**: Splits feature requests into explicit failing test creation tasks followed by implementation tasks.
 
 ### 2. Autonomous Execution with Jules Engine
-- Supports both **Live Jules API** execution and an interactive **Demo Simulator**.
-- Real-time streaming execution logs, progress bar telemetry, and state transition monitoring (`queued` → `jules_running` → `verifying` → `passed`/`repairing`).
-- Concurrent multi-task dispatching for independent dependency nodes.
+- Live-only dispatch to the **Google Jules API** — every task is a real, remotely-executed session; there is no simulated or demo execution path.
+- After dispatch, the session id is returned so progress can be tracked at jules.google.
 
 ### 3. Multi-Layer Adversarial Verification (PILLAR 2)
 Before any pull request is generated, changes undergo three layers of scrutiny:
@@ -129,8 +128,8 @@ Before any pull request is generated, changes undergo three layers of scrutiny:
 │                                                                        │
 │  ┌─────────────────┐    ┌──────────────────┐    ┌───────────────────┐  │
 │  │ /api/repo/*     │    │ /api/gemini/*    │    │ /api/jules/*      │  │
-│  │ Context fetcher │    │ Plan, SSE stream,│    │ Task create, poll,│  │
-│  │ & Tree caching  │    │ CoT verification │    │ cancel proxy      │  │
+│  │ Context fetcher │    │ Plan, SSE stream,│    │ Task create proxy │  │
+│  │ & Tree caching  │    │ CoT verification │    │ (live dispatch)   │  │
 │  └────────┬────────┘    └────────┬─────────┘    └────────┬──────────┘  │
 └───────────┼──────────────────────┼───────────────────────┼─────────────┘
             │                      │                       │
@@ -188,7 +187,7 @@ Open your browser at **`http://localhost:3000`**.
 | `APP_URL` | No | `http://localhost:3000` | Publicly accessible base URL for the server. |
 | `GITHUB_TOKEN` | No | `""` | Optional server-level GitHub personal access token fallback. |
 | `JULES_API_KEY` | No | `""` | Optional server-level Jules API key fallback. |
-| `JULES_BASE_URL`| No | `https://api.jules.ai/v1` | Base endpoint for the Jules agent runtime. |
+| `JULES_BASE_URL`| No | `https://jules.googleapis.com` | Base endpoint for the Jules agent runtime. |
 
 > 💡 **Tip**: Developers can also supply their `GitHub Token` and `Jules API Key` directly in the application's **Settings Tab**. Client-provided keys are sent via secure custom headers (`X-GitHub-Token`, `X-Jules-Key`) and are never written to disk or logged.
 
@@ -288,13 +287,13 @@ Because the server listens on `0.0.0.0:3000` and automatically mounts Vite middl
 │   ├── types/
 │   │   └── index.ts         # Shared TypeScript interfaces & types
 │   ├── data/
-│   │   └── mockData.ts      # Comprehensive mock presets & simulation fixtures
+│   │   └── defaultSettings.ts # Default live-mode settings & guardrail paths
 │   ├── services/
 │   │   ├── geminiService.ts # Task decomposition, SSE stream, CoT verification
 │   │   ├── githubService.ts # Context fetcher, branch compare, PR & CI integration
-│   │   └── julesService.ts  # Jules task submission, status polling, multi-dispatch
+│   │   └── julesService.ts  # Jules session dispatch to the live API
 │   └── components/
-│       ├── Navbar.tsx       # Mission control header & quick-preset selector
+│       ├── Navbar.tsx       # Mission control header
 │       ├── common/
 │       │   ├── DiffViewer.tsx   # Unified git patch visualizer with syntax styling
 │       │   └── TerminalLogs.tsx # Real-time execution log terminal
@@ -337,11 +336,11 @@ Quick summary of endpoints:
 
 ### 2. "GitHub compare returned 404 or empty diff"
 - Verify that your GitHub Personal Access Token possesses `repo` scope.
-- In Demo mode, simulated diffs are automatically provided if live credentials are not set.
+- The branch you are comparing must exist on the remote; comparisons always run against the live GitHub API.
 
-### 3. How do I switch between Demo Mode and Live Mode?
-- In the **Goal Tab**, use the toggle switch in the upper-right corner between **Demo Mode (Simulated)** and **Live Production**.
-- In Demo Mode, all operations run with full local simulation, ideal for UI testing and demos without consuming API quotas.
+### 3. Why do I get "GitHub token is required for live mode"?
+- RepoMission Studio is live-only: repository context, diffs, PR creation, and commenting all require a valid GitHub token (`contents:read` and `pull_requests:write` scopes for fine-grained PATs).
+- There is no demo/simulated fallback — any missing credential returns an explicit error instead of fabricated data.
 
 ---
 

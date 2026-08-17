@@ -81,7 +81,6 @@ interface CachedRepoData {
   manifestContent: string;
   rawReadmeSnippet: string;
   fetchedAt: string;
-  isMock: boolean;
   cachedAt: number;
 }
 const repoContextCache = new Map<string, CachedRepoData>();
@@ -102,20 +101,6 @@ function getGeminiClient(): GoogleGenAI | null {
   }
   return geminiClient;
 }
-
-// In-memory store for Jules real/simulated tasks
-interface JulesTaskStore {
-  id: string;
-  payload: any;
-  status: 'pending' | 'queued' | 'jules_running' | 'verifying' | 'passed' | 'failed_verification' | 'repairing' | 'escalated_to_human' | 'cancelled';
-  progress: number;
-  currentStage: string;
-  logs: string[];
-  createdAt: number;
-  updatedAt: number;
-  diff?: any;
-}
-const julesTaskMap = new Map<string, JulesTaskStore>();
 
 // Helper for extracting credentials safely from Headers first
 function extractGitHubToken(req: Request): string | undefined {
@@ -188,55 +173,22 @@ app.post('/api/github/test-connection', async (req, res) => {
 app.post('/api/repo/fetch-context', async (req, res) => {
   try {
     const token = extractGitHubToken(req) || req.body?.token;
-    const { repo, baseBranch = 'main', baseUrl = 'https://api.github.com', mode = 'demo', forceRefresh = false } = req.body;
+    const { repo, baseBranch = 'main', baseUrl = 'https://api.github.com', forceRefresh = false } = req.body;
     if (!repo) {
       return res.status(400).json({ error: 'Repository owner/name is required' });
     }
 
-    const cacheKey = `${repo}:${baseBranch}:${mode}`;
+    if (!token) {
+      return res.status(400).json({ error: 'GitHub token is required for live mode' });
+    }
+
+    const cacheKey = `${repo}:${baseBranch}`;
     const cached = repoContextCache.get(cacheKey);
     if (!forceRefresh && cached && (Date.now() - cached.cachedAt) < CACHE_TTL_MS) {
       return res.json({
         ...cached,
         cached: true,
       });
-    }
-
-    if (mode === 'demo' || !token) {
-      const demoData: CachedRepoData = {
-        summary: `Repository ${repo} context loaded in Demo Mode. Contains modern React/TypeScript components, utilities, and test suites.`,
-        defaultBranch: baseBranch,
-        treeSummary: [
-          'src/main.tsx',
-          'src/App.tsx',
-          'src/pages/analytics/AnalyticsDashboard.tsx',
-          'src/pages/analytics/MetricCard.tsx',
-          'src/components/analytics/DataTable.tsx',
-          'src/utils/formatters.ts',
-          'src/utils/date.ts',
-          'tests/analytics/AnalyticsDashboard.test.tsx',
-          'package.json',
-          'vite.config.ts',
-          '.github/workflows/ci.yml',
-        ],
-        relevantFiles: [
-          'src/pages/analytics/AnalyticsDashboard.tsx',
-          'src/components/analytics/DataTable.tsx',
-          'src/utils/formatters.ts',
-          'tests/analytics/AnalyticsDashboard.test.tsx',
-        ],
-        testDirs: ['tests/', 'tests/analytics/'],
-        hasCI: true,
-        ciDetails: 'GitHub Actions workflow .github/workflows/ci.yml detected',
-        manifestType: 'package.json (Node.js)',
-        manifestContent: '{\n  "name": "acme-dashboard",\n  "dependencies": { "react": "^19.0.0" },\n  "devDependencies": { "vitest": "^3.0.0" }\n}',
-        rawReadmeSnippet: `# ${repo}\nHigh-performance web client and telemetry reporting interface.`,
-        fetchedAt: new Date().toISOString(),
-        isMock: true,
-        cachedAt: Date.now(),
-      };
-      repoContextCache.set(cacheKey, demoData);
-      return res.json(demoData);
     }
 
     // Live mode with GitHub REST API
@@ -327,7 +279,6 @@ app.post('/api/repo/fetch-context', async (req, res) => {
       manifestContent,
       rawReadmeSnippet: readmeSnippet,
       fetchedAt: new Date().toISOString(),
-      isMock: false,
       cachedAt: Date.now(),
     };
 
@@ -419,37 +370,7 @@ Generate 4 to 6 concise, comprehensive, and testable acceptance criteria for thi
         suggestedConstraints: Array.isArray(parsed.suggestedConstraints) ? parsed.suggestedConstraints : [],
       });
     } else {
-      // Intelligent fallback for demo / offline mode
-      const goalLower = goal.toLowerCase();
-      const generated: string[] = [];
-
-      if (goalLower.includes('csv') || goalLower.includes('export')) {
-        generated.push('Export button or trigger is accessible in the primary user interface');
-        generated.push('Generates RFC 4180 compliant CSV formatting with properly escaped commas and double-quotes');
-        generated.push('Handles empty records and special character sets gracefully without runtime throwing');
-        generated.push('Automated unit tests in tests/ verify serialization accuracy and performance');
-      } else if (goalLower.includes('auth') || goalLower.includes('login') || goalLower.includes('jwt')) {
-        generated.push('Authentication workflow safely validates user credentials and issues token');
-        generated.push('Unauthorized requests receive HTTP 401 with structured error message');
-        generated.push('Sensitive secrets and tokens are never leaked in client responses or telemetry logs');
-        generated.push('Unit and integration tests verify token expiration and refresh cycles');
-      } else if (goalLower.includes('filter') || goalLower.includes('search')) {
-        generated.push('Search/filter inputs instantly update the active query parameters');
-        generated.push('Empty search queries reset view to show default dataset');
-        generated.push('Special regex characters and whitespace do not trigger unhandled exceptions');
-        generated.push('Unit tests verify matching behavior across varied input schemas');
-      } else {
-        generated.push(`Primary functionality executes as described: ${goal.slice(0, 70)}`);
-        generated.push('UI components update predictably and provide clear feedback during loading/error states');
-        generated.push('Edge cases such as null/undefined inputs and network timeouts are handled cleanly');
-        generated.push('Dedicated unit or integration test suite added to prevent future regression');
-      }
-
-      return res.json({
-        criteria: generated,
-        rationale: 'Generated structured acceptance criteria based on standard verification patterns.',
-        suggestedConstraints: ['Do not modify core infrastructure or workflow configs'],
-      });
+      return res.status(503).json({ error: 'GEMINI_API_KEY is required to generate acceptance criteria in live mode.' });
     }
   } catch (err: any) {
     console.error('Criteria generation error:', err);
@@ -565,81 +486,7 @@ Repository Context:
       const parsed = JSON.parse(response.text?.trim() || '{}');
       return res.json(parsed);
     } else {
-      // Deterministic Fallback Plan with Test-First support
-      const goalSlug = (goalInput.goal || 'feature').slice(0, 30).replace(/\s+/g, '-').toLowerCase();
-      const isTestFirst = !!goalInput.testFirstMode;
-
-      const fallbackTasks = isTestFirst
-        ? [
-            {
-              id: 'TASK-01',
-              title: `[Test-First] Write failing unit tests for ${goalSlug}`,
-              description: `Construct automated tests defining input schemas, expected return structures, and boundary errors before implementation.`,
-              why: 'Test-first methodology guarantees test coverage and prevents regression.',
-              risk: 'low' as const,
-              estimated_complexity: 'small' as const,
-              depends_on: [],
-              expected_paths: ['tests/'],
-              forbidden_paths: ['.github/workflows/', 'migrations/'],
-              acceptance_criteria: ['Unit test file defines edge cases and failing assertions for requested features'],
-              jules_prompt: `Write automated unit tests asserting expected behaviors for: ${goalInput.goal}.\nDo not write the application code yet.`,
-              is_test_task: true,
-            },
-            {
-              id: 'TASK-02',
-              title: `Implement core logic to pass failing tests`,
-              description: `Write minimal, strongly-typed logic under expected paths to turn all unit tests green.`,
-              why: 'Fulfills core feature requirements.',
-              risk: 'low' as const,
-              estimated_complexity: 'medium' as const,
-              depends_on: ['TASK-01'],
-              expected_paths: goalInput.allowedPaths?.length ? goalInput.allowedPaths : ['src/'],
-              forbidden_paths: ['.github/workflows/', 'migrations/'],
-              acceptance_criteria: goalInput.acceptanceCriteria || ['All test suites pass cleanly'],
-              jules_prompt: `Implement minimal code to make tests from TASK-01 pass.`,
-              is_test_task: false,
-            },
-          ]
-        : [
-            {
-              id: 'TASK-01',
-              title: `Implement core logic and utilities for ${goalSlug}`,
-              description: `Create dedicated module containing pure business logic and data transforms.`,
-              why: 'Establishes isolated, verifiable utility foundation.',
-              risk: 'low' as const,
-              estimated_complexity: 'small' as const,
-              depends_on: [],
-              expected_paths: goalInput.allowedPaths?.length ? goalInput.allowedPaths : ['src/utils/', 'tests/'],
-              forbidden_paths: ['.github/workflows/', 'secrets/'],
-              acceptance_criteria: goalInput.acceptanceCriteria?.slice(0, 2) || ['Core function handles inputs and edge cases'],
-              jules_prompt: `Implement core utility functions for: ${goalInput.goal}.`,
-            },
-            {
-              id: 'TASK-02',
-              title: `Integrate ${goalSlug} components & add unit tests`,
-              description: `Connect the core logic to UI workflow and write regression tests.`,
-              why: 'Exposes feature functionality to end users.',
-              risk: 'low' as const,
-              estimated_complexity: 'medium' as const,
-              depends_on: ['TASK-01'],
-              expected_paths: ['src/components/', 'tests/'],
-              forbidden_paths: ['.github/workflows/'],
-              acceptance_criteria: goalInput.acceptanceCriteria || ['UI renders correctly with passing tests'],
-              jules_prompt: `Connect UI and write unit tests for ${goalInput.goal}.`,
-            },
-          ];
-
-      return res.json({
-        summary: `Decomposed goal into ${fallbackTasks.length} discrete implementation phases for ${goalInput.repo}.`,
-        open_questions: [
-          'Are there specific browser or runtime version limits to adhere to?',
-        ],
-        risks: [
-          'Ensure unit test coverage handles null and empty boundary inputs.',
-          'Verify that no forbidden paths are modified during execution.',
-        ],
-        tasks: fallbackTasks,
-      });
+      return res.status(503).json({ error: 'GEMINI_API_KEY is required to generate a plan in live mode.' });
     }
   } catch (err: any) {
     console.error('Plan generation error:', err);
@@ -732,9 +579,7 @@ Repository Context:
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
       return res.end();
     } else {
-      // Fallback streaming simulation
-      res.write(`data: ${JSON.stringify({ chunk: JSON.stringify({ summary: "Demo Plan Generated", tasks: [] }) })}\n\n`);
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: 'GEMINI_API_KEY is required to stream a plan in live mode.' })}\n\n`);
       return res.end();
     }
   } catch (err: any) {
@@ -763,34 +608,10 @@ app.post('/api/github/compare', async (req, res) => {
     });
 
     if (!jsonRes.ok) {
-      // Fallback mock diff if compare fails (e.g. branch does not exist on remote or demo mode)
-      const mockDiff = {
-        files: [
-          {
-            filename: 'src/utils/csvExport.ts',
-            status: 'added',
-            additions: 84,
-            deletions: 0,
-            changes: 84,
-            patch: '@@ -0,0 +1,84 @@\n+export function serializeCsv(rows: Record<string, any>[]): string {\n+  return rows.map(r => Object.values(r).join(",")).join("\\n");\n+}',
-          },
-          {
-            filename: 'tests/utils/csvExport.test.ts',
-            status: 'added',
-            additions: 42,
-            deletions: 0,
-            changes: 42,
-            patch: '@@ -0,0 +1,42 @@\n+import { test, expect } from "vitest";\n+import { serializeCsv } from "../../src/utils/csvExport";\n+\n+test("exports valid CSV string", () => {\n+  expect(serializeCsv([{ a: 1 }])).toBe("1");\n+});',
-          },
-        ],
-        totalAdditions: 126,
-        totalDeletions: 0,
-        totalFiles: 2,
-        rawPatch: 'diff --git a/src/utils/csvExport.ts b/src/utils/csvExport.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/utils/csvExport.ts\n@@ -0,0 +1,84 @@\n+export function serializeCsv(rows: Record<string, any>[]): string {\n+  return rows.map(r => Object.values(r).join(",")).join("\\n");\n+}',
-        baseCommit: 'a1b2c3d',
-        headCommit: 'e4f5g6h',
-      };
-      return res.json(mockDiff);
+      const errJson = await jsonRes.json().catch(() => ({})) as any;
+      return res.status(jsonRes.status).json({
+        error: errJson.message || `GitHub compare failed with status ${jsonRes.statusText}`,
+      });
     }
 
     const jsonData = await jsonRes.json() as any;
@@ -984,24 +805,7 @@ ${(diff?.rawPatch || fileList.map((f: any) => `diff --git a/${f.filename} b/${f.
 
       semanticResult = JSON.parse(response.text?.trim() || '{}');
     } else {
-      // High-fidelity fallback verification
-      const criteriaList = (acceptanceCriteria || []).map((c: string) => ({
-        criterion: c,
-        status: 'pass' as const,
-        evidence: `Verified in diff for ${fileList.map((f: any) => f.filename).slice(0, 2).join(', ')}.`,
-      }));
-
-      semanticResult = {
-        thinking: `<thinking>\n1. Evaluated diff for ${fileList.length} files.\n2. Additions: ${totalAdditions}, Deletions: ${totalDeletions}.\n3. Verified test coverage present: ${hasTests}.\n4. All acceptance criteria explicitly proven by diff.\n</thinking>`,
-        pass: true,
-        score: 0.96,
-        summary: 'The implementation cleanly addresses the goal and acceptance criteria with targeted changes and unit test coverage.',
-        criteria_results: criteriaList,
-        risks: ['Ensure staging deployment verifies real database connections.'],
-        scope_violations: [],
-        missing_requirements: [],
-        recommended_action: 'approve',
-      };
+      return res.status(503).json({ error: 'GEMINI_API_KEY is required to verify changes in live mode.' });
     }
 
     let overallAction = semanticResult.recommended_action;
@@ -1064,20 +868,7 @@ Add or update tests to prove the fix.`;
       });
       return res.json({ repairPrompt: response.text?.trim() });
     } else {
-      const repairPrompt = `REPAIR INSTRUCTION:
-Please address the following verification failures on ${task?.title || 'the task'}:
-
-FAILED CRITERIA:
-${(failedCriteria || []).map((c: string, i: number) => `${i + 1}. ${c}`).join('\n')}
-
-ISSUES TO RESOLVE:
-${(issues || []).map((iss: string, i: number) => `- ${iss}`).join('\n')}
-
-MANDATES:
-- Apply the minimal corrective patch necessary.
-- Update test cases in tests/ to assert the fix.
-- Do not modify forbidden paths or alter unrelated files.`;
-      return res.json({ repairPrompt });
+      return res.status(503).json({ error: 'GEMINI_API_KEY is required to generate a repair prompt in live mode.' });
     }
   } catch (err: any) {
     return res.status(500).json({ error: err.message || 'Failed to generate repair prompt' });
@@ -1085,128 +876,68 @@ MANDATES:
 });
 
 // ==========================================
-// 7. API: Jules Task Adapter (Real & Polling Supported)
+// 7. API: Jules Task Dispatch
 // ==========================================
 app.post('/api/jules/task/create', async (req, res) => {
   try {
     const julesKey = extractJulesKey(req);
-    const { payload, julesBaseUrl = 'https://api.jules.ai/v1', mode = 'mock' } = req.body;
-    const taskId = `jul_${Math.random().toString(36).substring(2, 11)}`;
+    const { payload, julesBaseUrl = 'https://jules.googleapis.com' } = req.body;
 
-    if (mode === 'live' && julesKey) {
-      try {
-        const julesRes = await fetch(`${julesBaseUrl.replace(/\/$/, '')}/tasks`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${julesKey}`,
-          },
-          body: JSON.stringify(payload),
-        });
-
-        if (julesRes.ok) {
-          const liveData = await julesRes.json() as any;
-          return res.json({
-            taskId: liveData.id || taskId,
-            status: 'jules_running',
-            message: 'Task submitted to Jules Live API',
-            isLive: true,
-          });
-        }
-      } catch (err) {
-        console.warn('Live Jules API unreachable, falling back to simulated execution adapter:', err);
-      }
+    if (!julesKey) {
+      return res.status(400).json({ error: 'JULES_API_KEY is required to dispatch a task in live mode.' });
     }
 
-    // High-fidelity Execution Adapter
-    const initialTask: JulesTaskStore = {
-      id: taskId,
-      payload,
-      status: 'jules_running',
-      progress: 15,
-      currentStage: 'Provisioning isolated sandbox environment...',
-      logs: [
-        `[${new Date().toLocaleTimeString()}] Jules Agent Session initialized.`,
-        `[${new Date().toLocaleTimeString()}] Target Repo: ${payload.repository || 'acme/dashboard'} (Base: ${payload.base_branch || 'main'})`,
-        `[${new Date().toLocaleTimeString()}] Head Branch: ${payload.head_branch || `jules/task/${taskId}`}`,
-        `[${new Date().toLocaleTimeString()}] Provisioning virtual execution container with Node.js 22 & Git...`,
-      ],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+    // 1. Append path constraints to the prompt since Jules relies on natural language instructions
+    const constraintText = (payload.constraints?.forbidden_paths?.length || payload.constraints?.allowed_paths?.length)
+      ? `\n\nSTRICT CONSTRAINTS:\n- Allowed paths: ${(payload.constraints.allowed_paths || []).join(', ') || 'Any safe app path'}\n- FORBIDDEN paths (DO NOT TOUCH): ${(payload.constraints.forbidden_paths || []).join(', ')}`
+      : '';
+
+    // 2. Format payload for Google Jules API
+    const julesPayload = {
+      title: payload.title || `Jules Task ${payload.task_id}`,
+      prompt: `${payload.prompt}${constraintText}`,
+      sourceContext: {
+        source: `sources/github/${payload.repository}`, // Must match installed app
+        githubRepoContext: {
+          startingBranch: payload.base_branch || 'main'
+        }
+      }
     };
 
-    julesTaskMap.set(taskId, initialTask);
+    // 3. Clean the base URL and append the correct API path
+    const cleanBaseUrl = (julesBaseUrl || 'https://jules.googleapis.com')
+      .replace(/\/v1\/?$/, '')
+      .replace(/\/$/, '');
+
+    const julesRes = await fetch(`${cleanBaseUrl}/v1alpha/sessions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': julesKey, // Jules uses this header, NOT Bearer
+      },
+      body: JSON.stringify(julesPayload),
+    });
+
+    if (!julesRes.ok) {
+      const errText = await julesRes.text();
+      console.error('[JULES API ERROR]', errText);
+      return res.status(julesRes.status).json({ error: errText || `Jules API rejected the request with status ${julesRes.status}` });
+    }
+
+    const liveData = await julesRes.json() as any;
+    // Jules returns a name like "sessions/abc123-def456"
+    const sessionId = liveData.name?.split('/')[1] || liveData.id;
 
     return res.json({
-      taskId,
+      taskId: sessionId,
       status: 'jules_running',
-      message: 'Jules autonomous task initialized',
-      isLive: false,
+      message: 'Task successfully submitted to Jules Live API',
+      isLive: true,
+      liveData
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || 'Failed to create Jules task' });
+    return res.status(500).json({ error: err.message || 'Failed to dispatch Jules task' });
   }
-});
-
-app.get('/api/jules/task/:taskId', (req, res) => {
-  const { taskId } = req.params;
-  const task = julesTaskMap.get(taskId);
-
-  if (!task) {
-    return res.status(404).json({ error: `Jules task ${taskId} not found` });
-  }
-
-  const elapsed = (Date.now() - task.createdAt) / 1000;
-
-  if (task.status === 'jules_running') {
-    if (elapsed < 3) {
-      task.progress = 30;
-      task.currentStage = 'Cloning base branch and analyzing AST tree...';
-      if (!task.logs.some(l => l.includes('Cloning base branch'))) {
-        task.logs.push(`[${new Date().toLocaleTimeString()}] Cloned repository into ephemeral workspace.`);
-        task.logs.push(`[${new Date().toLocaleTimeString()}] Parsing AST and validating path constraints.`);
-      }
-    } else if (elapsed < 6) {
-      task.progress = 65;
-      task.currentStage = 'Synthesizing changes and writing files...';
-      if (!task.logs.some(l => l.includes('Synthesizing changes'))) {
-        task.logs.push(`[${new Date().toLocaleTimeString()}] Synthesizing changes in target files...`);
-        task.logs.push(`[${new Date().toLocaleTimeString()}] Created utility module and added export handlers.`);
-        task.logs.push(`[${new Date().toLocaleTimeString()}] Generated unit test suite.`);
-      }
-    } else if (elapsed < 9) {
-      task.progress = 90;
-      task.currentStage = 'Executing test suite and linting...';
-      if (!task.logs.some(l => l.includes('Executing test suite'))) {
-        task.logs.push(`[${new Date().toLocaleTimeString()}] Running \`vitest run\` in test container...`);
-        task.logs.push(`[${new Date().toLocaleTimeString()}] PASS tests/analytics/AnalyticsExport.test.tsx (4 passed, 0 failed)`);
-        task.logs.push(`[${new Date().toLocaleTimeString()}] Code formatting and lint checks passed with 0 errors.`);
-      }
-    } else {
-      task.progress = 100;
-      task.status = 'passed';
-      task.currentStage = 'Branch pushed & ready for verification';
-      if (!task.logs.some(l => l.includes('Branch pushed'))) {
-        task.logs.push(`[${new Date().toLocaleTimeString()}] Git commit created: "${task.payload?.title || 'Autonomous task implementation'}"`);
-        task.logs.push(`[${new Date().toLocaleTimeString()}] Pushed ref refs/heads/${task.payload?.head_branch || 'jules/branch'}`);
-        task.logs.push(`[${new Date().toLocaleTimeString()}] Mission execution completed successfully.`);
-      }
-    }
-  }
-
-  task.updatedAt = Date.now();
-  return res.json(task);
-});
-
-app.post('/api/jules/task/:taskId/cancel', (req, res) => {
-  const { taskId } = req.params;
-  const task = julesTaskMap.get(taskId);
-  if (task) {
-    task.status = 'cancelled';
-    task.logs.push(`[${new Date().toLocaleTimeString()}] Task cancelled by operator.`);
-    return res.json({ success: true, message: `Task ${taskId} cancelled` });
-  }
-  return res.status(404).json({ error: 'Task not found' });
 });
 
 // ==========================================
@@ -1221,21 +952,7 @@ app.post('/api/github/create-pr', async (req, res) => {
     }
 
     if (!token) {
-      const mockPrNumber = Math.floor(Math.random() * 800) + 120;
-      return res.json({
-        success: true,
-        isMock: true,
-        pullRequest: {
-          number: mockPrNumber,
-          title,
-          html_url: `https://github.com/${repo}/pull/${mockPrNumber}`,
-          state: 'open',
-          head: { ref: head },
-          base: { ref: base },
-          created_at: new Date().toISOString(),
-        },
-        message: 'Pull request created in Demo Mode',
-      });
+      return res.status(400).json({ error: 'GitHub token is required to create a pull request in live mode.' });
     }
 
     const cleanBaseUrl = baseUrl.replace(/\/$/, '');
@@ -1264,7 +981,6 @@ app.post('/api/github/create-pr', async (req, res) => {
     const prData = await prRes.json() as any;
     return res.json({
       success: true,
-      isMock: false,
       pullRequest: prData,
       message: `Pull Request #${prData.number} successfully created on GitHub!`,
     });
@@ -1282,16 +998,7 @@ app.post('/api/github/comment-pr', async (req, res) => {
     }
 
     if (!token) {
-      return res.json({
-        success: true,
-        isMock: true,
-        message: `Verification comment successfully posted to PR #${issueNumber} (Demo Mode).`,
-        comment: {
-          id: Math.floor(Math.random() * 100000),
-          html_url: `https://github.com/${repo}/pull/${issueNumber}#issuecomment-demo`,
-          created_at: new Date().toISOString(),
-        },
-      });
+      return res.status(400).json({ error: 'GitHub token is required to post a comment in live mode.' });
     }
 
     const cleanBaseUrl = baseUrl.replace(/\/$/, '');
@@ -1314,7 +1021,6 @@ app.post('/api/github/comment-pr', async (req, res) => {
     const commentData = await commentRes.json() as any;
     return res.json({
       success: true,
-      isMock: false,
       comment: commentData,
       message: 'Verification comment successfully posted to GitHub Pull Request!',
     });

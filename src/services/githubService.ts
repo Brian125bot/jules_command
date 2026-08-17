@@ -1,12 +1,10 @@
 import { BranchDiff, CiCheckRun, RepoContext } from '../types';
-import { MOCK_REPO_CONTEXT, MOCK_BRANCH_DIFF } from '../data/mockData';
 
 export interface FetchRepoParams {
   repo: string;
   baseBranch?: string;
   token?: string;
   baseUrl?: string;
-  mode?: 'demo' | 'live';
   forceRefresh?: boolean;
 }
 
@@ -16,7 +14,6 @@ export interface BranchDiffParams {
   head: string;
   token?: string;
   baseUrl?: string;
-  mode?: 'demo' | 'live';
 }
 
 export interface CiStatusParams {
@@ -24,7 +21,6 @@ export interface CiStatusParams {
   ref: string;
   token?: string;
   baseUrl?: string;
-  mode?: 'demo' | 'live';
 }
 
 export class GitHubService {
@@ -58,35 +54,26 @@ export class GitHubService {
     repoOrParams: string | FetchRepoParams,
     baseBranch = 'main',
     token?: string,
-    baseUrl = 'https://api.github.com',
-    mode: 'demo' | 'live' = 'demo'
+    baseUrl = 'https://api.github.com'
   ): Promise<RepoContext> {
     const params: FetchRepoParams =
       typeof repoOrParams === 'string'
-        ? { repo: repoOrParams, baseBranch, token, baseUrl, mode }
+        ? { repo: repoOrParams, baseBranch, token, baseUrl }
         : repoOrParams;
 
     const actualRepo = params.repo;
     const actualBase = params.baseBranch || 'main';
     const actualToken = params.token;
     const actualBaseUrl = params.baseUrl || 'https://api.github.com';
-    const actualMode = params.mode || 'demo';
 
-    if (actualMode === 'demo' && !actualToken) {
-      await new Promise(r => setTimeout(r, 350));
-      return {
-        ...MOCK_REPO_CONTEXT,
-        summary: `Repository ${actualRepo} loaded with full tree, manifests, and test suites.`,
-        defaultBranch: actualBase,
-      };
+    if (!actualToken || !actualToken.trim()) {
+      throw new Error('GitHub token is required for live mode');
     }
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
-    if (actualToken && actualToken.trim()) {
-      headers['X-GitHub-Token'] = actualToken.trim();
-    }
+    headers['X-GitHub-Token'] = actualToken.trim();
 
     const res = await fetch('/api/repo/fetch-context', {
       method: 'POST',
@@ -95,7 +82,6 @@ export class GitHubService {
         repo: actualRepo,
         baseBranch: actualBase,
         baseUrl: actualBaseUrl,
-        mode: actualMode,
         forceRefresh: params.forceRefresh || false,
       }),
     });
@@ -123,42 +109,32 @@ export class GitHubService {
         ? { repo: repoOrParams, base, head, token, baseUrl }
         : repoOrParams;
 
-    if (!params.token || params.mode === 'demo') {
-      await new Promise(r => setTimeout(r, 250));
-      return {
-        ...MOCK_BRANCH_DIFF,
-        rawPatch: MOCK_BRANCH_DIFF.rawPatch || MOCK_BRANCH_DIFF.files.map(f => `diff --git a/${f.filename} b/${f.filename}\n${f.patch}`).join('\n\n'),
-      };
+    if (!params.token || !params.token.trim()) {
+      throw new Error('GitHub token is required for live mode');
     }
 
-    try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (params.token && params.token.trim()) {
-        headers['X-GitHub-Token'] = params.token.trim();
-      }
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    headers['X-GitHub-Token'] = params.token.trim();
 
-      const res = await fetch('/api/github/compare', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          repo: params.repo,
-          base: params.base,
-          head: params.head,
-          baseUrl: params.baseUrl || 'https://api.github.com',
-        }),
-      });
+    const res = await fetch('/api/github/compare', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        repo: params.repo,
+        base: params.base,
+        head: params.head,
+        baseUrl: params.baseUrl || 'https://api.github.com',
+      }),
+    });
 
-      if (!res.ok) {
-        return MOCK_BRANCH_DIFF;
-      }
-
-      const data = await res.json();
-      return data;
-    } catch {
-      return MOCK_BRANCH_DIFF;
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `GitHub compare failed with status ${res.status}`);
     }
+
+    return await res.json();
   }
 
   /**
@@ -182,18 +158,8 @@ export class GitHubService {
         ? { repo: repoOrParams, ref, token, baseUrl }
         : repoOrParams;
 
-    if (!params.token || params.mode === 'demo') {
-      return {
-        pass: true,
-        status: 'success',
-        checkRuns: [
-          { name: 'TypeScript Typecheck', status: 'completed', conclusion: 'success' },
-          { name: 'Vitest Unit & Integration Suite', status: 'completed', conclusion: 'success' },
-          { name: 'Security & Dependency Scan', status: 'completed', conclusion: 'success' },
-          { name: 'Vite Production Build', status: 'completed', conclusion: 'success' },
-        ],
-        message: 'All 4 CI verification checks passed successfully.',
-      };
+    if (!params.token || !params.token.trim()) {
+      throw new Error('GitHub token is required for live mode');
     }
 
     try {

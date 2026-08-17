@@ -1,0 +1,6 @@
+{
+  "name": "Jules RepoMission Studio",
+  "description": "Mission control center for autonomous repo modifications with goal planning, Jules agent execution, multi-layer verification, and PR orchestration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

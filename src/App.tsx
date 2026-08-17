@@ -238,17 +238,20 @@ export default function App() {
         tasks: tasksWithApprovals,
       });
 
-      // Seed initial execution queue items
+      // Preserve existing execution queue items across regeneration
+      const slug = activeGoalInput.goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 20);
       const initialQueue: ExecutionItem[] = tasksWithApprovals.map(t => {
-        const slug = activeGoalInput.goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 20);
+        const existing = executionQueue.find(eq => eq.taskId === t.id);
         return {
           taskId: t.id,
           taskTitle: t.title,
-          branchName: `jules/${slug}/${t.id.toLowerCase()}`,
-          status: 'pending',
-          progress: 0,
-          currentStage: 'Pending approval & trigger',
-          logs: [],
+          branchName: existing?.branchName || `jules/${slug}/${t.id.toLowerCase()}`,
+          status: existing?.status || 'pending',
+          progress: existing?.progress || 0,
+          currentStage: existing?.currentStage || 'Pending approval & trigger',
+          logs: existing?.logs || [],
+          julesTaskId: existing?.julesTaskId,
+          error: existing?.error,
         };
       });
       setExecutionQueue(initialQueue);
@@ -297,26 +300,48 @@ export default function App() {
 
   // Execute a single task
   const handleExecuteTask = async (taskId: string, forceHighRisk: boolean = false) => {
-    if (!plan) return;
+    if (!plan) {
+      showToast('No implementation plan found. Generate a plan before executing tasks.', 'warning');
+      return;
+    }
     const task = plan.tasks.find(t => t.id === taskId);
-    if (!task) return;
+    if (!task) {
+      showToast(`Task ${taskId} not found in the current plan.`, 'warning');
+      return;
+    }
 
     const slug = goalInput.goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 20);
     const branchName = `jules/${slug}/${task.id.toLowerCase()}`;
 
-    setExecutionQueue(prev =>
-      prev.map(item =>
+    // Ensure the execution queue has this task; add it if missing
+    setExecutionQueue(prev => {
+      const exists = prev.some(item => item.taskId === taskId);
+      if (!exists) {
+        return [
+          ...prev,
+          {
+            taskId,
+            taskTitle: task.title,
+            branchName,
+            status: 'submitted' as const,
+            progress: 5,
+            currentStage: 'Submitting session to Jules API...',
+            logs: [`[${new Date().toLocaleTimeString()}] Submitting task ${taskId} to Jules agent...`],
+          },
+        ];
+      }
+      return prev.map(item =>
         item.taskId === taskId
           ? {
               ...item,
-              status: 'submitted',
+              status: 'submitted' as const,
               progress: 5,
               currentStage: 'Submitting session to Jules API...',
               logs: [`[${new Date().toLocaleTimeString()}] Submitting task ${taskId} to Jules agent...`],
             }
           : item
-      )
-    );
+      );
+    });
 
     try {
       const res = await JulesService.startTask({

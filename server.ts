@@ -1076,7 +1076,8 @@ app.post('/api/jules/task/create', async (req, res) => {
       sourceContext: {
         source: `sources/github/${payload.repository}`, // Must match installed app
         githubRepoContext: {
-          startingBranch: payload.base_branch || 'main'
+          startingBranch: payload.base_branch || 'main',
+          targetBranch: payload.head_branch || `jules/${(payload.task_id || 'task').toLowerCase()}`
         }
       }
     };
